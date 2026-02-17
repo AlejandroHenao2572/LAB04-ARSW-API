@@ -247,6 +247,47 @@ public class BlueprintsAPIController {
             .body(ApiResponse.updated("Point added successfully", updated));
     }
 
+    @Operation(
+        summary = "Eliminar blueprint",
+        description = "Elimina un blueprint específico identificado por autor y nombre"
+    )
+    @ApiResponses(value = {
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Blueprint eliminado exitosamente",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = Object.class)
+            )
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Blueprint no encontrado",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = Object.class)
+            )
+        )
+    })
+    /**
+     * Elimina un blueprint específico por autor y nombre
+     * @param author Nombre del autor
+     * @param bpname Nombre del blueprint
+     * @return 200 OK con mensaje de confirmación
+     * @throws BlueprintNotFoundException si no existe (manejado por GlobalExceptionHandler)
+     */
+    @DeleteMapping("/{author}/{bpname}")
+    public ResponseEntity<ApiResponse<Void>> deleteBlueprint(
+            @Parameter(description = "Nombre del autor del blueprint", required = true, example = "john_doe")
+            @PathVariable String author,
+            @Parameter(description = "Nombre del blueprint", required = true, example = "house_plan")
+            @PathVariable String bpname) throws BlueprintNotFoundException {
+        services.deleteBlueprint(author, bpname);
+        return ResponseEntity.ok(
+            ApiResponse.success("Blueprint deleted successfully", null)
+        );
+    }
+
     /**
      * DTO para crear blueprints con validaciones
      */
