@@ -1,5 +1,7 @@
 # LAB04-ARSW-API
 
+- David Alejandro Patacon Henao
+
 ## Implementacion completa de CRUD
 
 La documentacion completa de este API REST se encuentra en:  
@@ -74,3 +76,168 @@ La funcionalidad de eliminación fue implementada en las siguientes capas:
    - Endpoint REST con anotaciones OpenAPI
    - Manejo de respuestas 200 OK y 404 Not Found
    - Documentación completa en Swagger
+
+## STOMP — Sincronización en tiempo real
+
+Se agregó soporte para comunicación en tiempo real usando STOMP sobre WebSocket. Esto permite que múltiples clientes colaboren en un mismo blueprint recibiendo actualizaciones inmediatas cuando se agregan puntos.
+
+### Dependencias
+
+Se añadió la dependencia de WebSocket de Spring Boot en `pom.xml`:
+
+```xml
+<dependency>
+   <groupId>org.springframework.boot</groupId>
+   <artifactId>spring-boot-starter-websocket</artifactId>
+</dependency>
+```
+
+### Archivos nuevos y cambios principales
+
+
+### WebSocketConfig.java
+`src/main/java/edu/eci/arsw/blueprints/config/WebSocketConfig.java`
+```java
+@Configuration
+@EnableWebSocketMessageBroker          // Activa el broker STOMP sobre WebSocket
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        // El broker simple redistribuye mensajes a los clientes suscritos
+        // a cualquier destino que empiece con /topic
+        registry.enableSimpleBroker("/topic");
+        // Los mensajes que llegan desde el cliente dirigidos al servidor
+        // deben tener el prefijo /app (van al @MessageMapping)
+        registry.setApplicationDestinationPrefixes("/app");
+    }
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // Punto de entrada del WebSocket. El cliente conecta a:
+        // ws://localhost:8080/ws-blueprints
+        registry.addEndpoint("/ws-blueprints")
+                .setAllowedOriginPatterns("*");
+    }
+}
+```
+   - Configura STOMP sobre WebSocket.
+   - Registra el endpoint de handshake `/ws-blueprints`.
+   - Define el `applicationDestinationPrefix` como `/app` y habilita un `SimpleBroker` con prefijo `/topic`.
+
+### BlueprintWebSocketController.java
+`src/main/java/edu/eci/arsw/blueprints/controllers/BlueprintWebSocketController.java`
+```java
+@Controller
+public class BlueprintWebSocketController {
+    private final BlueprintsServices services;
+    private final SimpMessagingTemplate broker;
+    public BlueprintWebSocketController(BlueprintsServices services,
+                                        SimpMessagingTemplate broker) {
+        this.services = services;
+        this.broker   = broker;
+    }
+    // Los clientes publican a /app/draw
+    // El payload JSON que llega es: { "author": "...", "name": "...", "point": { "x": 0, "y": 0 } }
+    @MessageMapping("/draw")
+    public void handleDraw(DrawEvent event) throws BlueprintNotFoundException {
+        // 1. Persiste el punto en la base de datos
+        services.addPoint(event.author(), event.name(), event.point().x(), event.point().y());
+        // 2. Lee el plano actualizado (ya con el nuevo punto)
+        Blueprint updated = services.getBlueprint(event.author(), event.name());
+        // 3. Distribuye a TODOS los clientes suscritos a ese topic (incluido el emisor)
+        broker.convertAndSend(
+            "/topic/blueprints." + event.author() + "." + event.name(),
+            updated
+        );
+    }
+    // DTO de entrada
+    public record DrawEvent(String author, String name, PointDTO point) {}
+    public record PointDTO(int x, int y) {}
+}
+```
+   - Controlador que maneja mensajes entrantes vía STOMP.
+   - Expone un `@MessageMapping("/draw")` que recibe eventos de dibujo.
+   - El evento entrante tiene la forma JSON: `{ "author": "...", "name": "...", "point": { "x": <int>, "y": <int> } }`.
+   - Al recibir un `draw` se sigue este flujo:
+      1. `services.addPoint(author, name, x, y)` persiste el punto en la base de datos.
+      2. `services.getBlueprint(author, name)` obtiene el blueprint actualizado.
+      3. `broker.convertAndSend("/topic/blueprints.{author}.{name}", updatedBlueprint)` publica el blueprint actualizado a todos los suscriptores del topic correspondiente.
+
+### Destinos (topics) y rutas STOMP
+
+- Punto de publicación desde cliente al servidor (destino de aplicación):
+   - `/app/draw`
+
+- Destino (topic) al que el servidor publica las actualizaciones para que los clientes se suscriban:
+   - `/topic/blueprints.{author}.{name}`
+
+Ejemplo: si el autor es `juan` y el blueprint `plano-1`, el topic será `/topic/blueprints.juan.plano-1`.
+
+### Contrato de mensajes
+
+- Mensaje de entrada (cliente → servidor) publicado en `/app/draw`:
+
+```json
+{
+   "author": "juan",
+   "name": "plano-1",
+   "point": { "x": 120, "y": 80 }
+}
+```
+- Mensaje de salida (servidor → clientes) publicado en `/topic/blueprints.{author}.{name}`:
+   - El servidor envía el objeto `Blueprint` completo, es decir:
+```json
+{
+   "id": <numeric>,
+   "author": "juan",
+   "name": "plano-1",
+   "points": [ { "x": 10, "y": 20 }, { "x": 120, "y": 80 }, ... ]
+}
+```
+Enviar el blueprint completo (en lugar de solo el punto) garantiza que los clientes siempre reciban la versión final y filtrada del servidor.
+
+### CORS y WebSocket
+```java
+@Configuration
+public class CorsConfig {
+    @Bean
+    public CorsFilter corsFilter() {
+        CorsConfiguration config = new CorsConfiguration();
+        // Origenes permitidos
+        config.addAllowedOrigin("http://localhost:5173");   // Frontend
+        // Métodos HTTP permitidos
+        config.addAllowedMethod("GET");
+        config.addAllowedMethod("POST");
+        config.addAllowedMethod("PUT");
+        config.addAllowedMethod("DELETE");
+        // Cabeceras permitidas en la peticion
+        config.addAllowedHeader("*");
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        // Aplica esta configuración a TODOS los endpoints REST
+        source.registerCorsConfiguration("/api/**", config);
+        return new CorsFilter(source);
+    }
+}
+```
+- Para los endpoints REST se añadió un `CorsFilter` global (`CorsConfig.java`) que permite orígenes de  `http://localhost:5173` 
+
+### Cómo probar STOMP localmente
+
+1. Iniciar la API Spring Boot (por defecto en `http://localhost:8080`).
+
+```
+mvn spring-boot:run
+```
+2. Usar un cliente que soporte STOMP y conectar al endpoint WebSocket:
+
+```
+ws://localhost:8080/ws-blueprints
+```
+
+3. Suscribirse al topic del blueprint deseado:
+
+```
+/topic/blueprints.{author}.{name}
+```
+
+4. Publicar un mensaje en `/app/draw` con el payload descrito anteriormente. El servidor persistirá el punto y retransmitirá el blueprint actualizado a todos los suscriptores.
+

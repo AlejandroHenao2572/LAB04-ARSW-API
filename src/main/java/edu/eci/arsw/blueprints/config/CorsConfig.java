@@ -16,32 +16,20 @@ import org.springframework.web.filter.CorsFilter;
  */
 @Configuration
 public class CorsConfig {
-
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-
-        // Orígenes permitidos: frontend en desarrollo y en producción.
-        // Añade aquí el dominio de producción cuando lo despliegues.
-        config.addAllowedOrigin("http://localhost:5173");   // Vite dev server
-        config.addAllowedOrigin("http://localhost:4173");   // Vite preview
+        // Origenes permitidos
+        config.addAllowedOrigin("http://localhost:5173");   // Frontend
 
         // Métodos HTTP permitidos
         config.addAllowedMethod("GET");
         config.addAllowedMethod("POST");
         config.addAllowedMethod("PUT");
         config.addAllowedMethod("DELETE");
-        config.addAllowedMethod("OPTIONS");                 // preflight
 
-        // Cabeceras permitidas en la petición
+        // Cabeceras permitidas en la peticion
         config.addAllowedHeader("*");
-
-        // Permite enviar cookies/credenciales si en el futuro se añade autenticación
-        config.setAllowCredentials(true);
-
-        // Cuánto tiempo (en segundos) el navegador puede cachear la respuesta preflight.
-        // Reduce el número de peticiones OPTIONS repetidas.
-        config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         // Aplica esta configuración a TODOS los endpoints REST
